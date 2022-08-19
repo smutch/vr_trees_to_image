@@ -1,5 +1,8 @@
 #![feature(iter_collect_into)]
 
+use ::std::collections::HashSet;
+use std::path::PathBuf;
+
 use clap::Parser;
 use hdf5::{File, Result};
 use ndarray::{s, Array1, Array2, ArrayView1, Axis};
@@ -15,8 +18,8 @@ fn read_total_snaps(fin: &File) -> Result<usize> {
 fn read_unique_final_desc(
     fin: &File,
     total_snaps: usize,
-) -> Result<::std::collections::HashSet<u64>> {
-    let mut result = ::std::collections::HashSet::new();
+) -> Result<HashSet<u64>> {
+    let mut result = HashSet::new();
     for snap in 0..total_snaps {
         fin.dataset(format!("Snap_{snap:03}/FinalDescendant").as_str())?
             .read_1d::<u64>()?
@@ -180,8 +183,8 @@ fn write_unit(name: &str, unit: &str, group: &hdf5::Group) -> Result<()> {
 }
 
 fn read_halos(
-    trees_path: std::path::PathBuf,
-) -> Result<(::std::collections::HashSet<u64>, HaloProps)> {
+    trees_path: PathBuf,
+) -> Result<(HashSet<u64>, HaloProps)> {
     let fin = File::open(trees_path)?;
 
     let total_snaps = read_total_snaps(&fin)?;
@@ -238,7 +241,7 @@ fn place_pixels(id: u64, halo_props: &HaloProps) -> (Vec<Pixel>, ImageProps) {
         ref_pos,
         0,
         &mut 0,
-        &halo_props,
+        halo_props,
         false,
         // id == 619000000000517
     );
@@ -263,9 +266,9 @@ fn place_pixels(id: u64, halo_props: &HaloProps) -> (Vec<Pixel>, ImageProps) {
 
 #[derive(Parser)]
 struct Cli {
-    trees_path: std::path::PathBuf,
+    trees_path: PathBuf,
     #[clap(parse(from_os_str))]
-    output_path: std::path::PathBuf,
+    output_path: PathBuf,
 }
 
 fn main() -> Result<()> {
