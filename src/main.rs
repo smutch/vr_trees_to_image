@@ -114,39 +114,55 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
     max_depth
 }
 
-fn place_pixels(
+fn walk_and_place_pixels(
     id: u64,
     pixels: &mut Vec<Pixel>,
     ref_pos: ArrayView1<f32>,
     col: usize,
+    max_col: &mut usize,
     halo_props: &HaloProps,
+    debug: bool,
 ) {
+    if debug {
+        println!("{id}");
+    }
+
     let (snap, ind) = id_to_snap_ind(id);
     let prog_id = halo_props.progenitors[snap][ind];
+
     if prog_id != id {
-        place_pixels(prog_id, pixels, ref_pos, col, halo_props);
+        if debug {
+            println!("First progenitor of {id} = {prog_id}");
+        }
+        walk_and_place_pixels(prog_id, pixels, ref_pos, col, max_col, halo_props, debug);
 
         let mut cur_id = prog_id;
         let (prog_snap, prog_ind) = id_to_snap_ind(prog_id);
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
-        let mut _counter = 0u32;
         while next_id != cur_id {
-            place_pixels(next_id, pixels, ref_pos, col + 1, halo_props);
+            if debug {
+                println!("Next progenitor of {id} = {next_id} (from {cur_id})");
+            }
+            *max_col += 1;
+            walk_and_place_pixels(
+                next_id, pixels, ref_pos, *max_col, max_col, halo_props, debug,
+            );
             cur_id = next_id;
             let (next_snap, next_ind) = id_to_snap_ind(next_id);
             next_id = halo_props.next_progenitors[next_snap][next_ind];
 
-            _counter += 1;
-            if _counter > 1000 {
-                panic!(
-                    "I don't think we should have >1k next progenitors! Something has gone wrong!"
-                );
+            if *max_col > 1000 {
+                panic!("I don't think we should have >1k wide tree! Something has gone wrong!");
             }
         }
     }
 
     let pos = halo_props.positions[snap].slice(s![ind, ..]).into_owned();
     let displacement = (pos - ref_pos).mapv(|v| v.powi(2)).sum().sqrt();
+
+    if debug {
+        println!("{id},{snap},{col}");
+    }
 
     pixels.push(Pixel {
         snap,
@@ -163,17 +179,10 @@ fn write_unit(name: &str, unit: &str, group: &hdf5::Group) -> Result<()> {
     Ok(())
 }
 
-#[derive(Parser)]
-struct Cli {
+fn read_halos(
     trees_path: std::path::PathBuf,
-    #[clap(parse(from_os_str))]
-    output_path: std::path::PathBuf,
-}
-
-fn main() -> Result<()> {
-    let args = Cli::parse();
-
-    let fin = File::open(args.trees_path)?;
+) -> Result<(::std::collections::HashSet<u64>, HaloProps)> {
+    let fin = File::open(trees_path)?;
 
     let total_snaps = read_total_snaps(&fin)?;
     println!("Total snaps = {total_snaps}");
@@ -208,36 +217,79 @@ fn main() -> Result<()> {
         ]);
     }
 
+    Ok((final_descendants, halo_props))
+}
+
+#[derive(Debug)]
+struct ImageProps {
+    first_snap: usize,
+    last_snap: usize,
+    n_rows: usize,
+    n_cols: usize,
+}
+
+fn place_pixels(id: u64, halo_props: &HaloProps) -> (Vec<Pixel>, ImageProps) {
+    let mut pixels: Vec<Pixel> = Vec::new();
+    let ref_pos = halo_props.positions[id_to_snap(id)].slice(s![id_to_ind(id), ..]);
+
+    walk_and_place_pixels(
+        id,
+        &mut pixels,
+        ref_pos,
+        0,
+        &mut 0,
+        &halo_props,
+        false,
+        // id == 619000000000517
+    );
+
+    let first_snap = pixels.iter().map(|v| v.snap).min().unwrap();
+    let last_snap = pixels.iter().map(|v| v.snap).max().unwrap();
+    let n_rows = last_snap - first_snap + 1;
+    for v in pixels.iter_mut() {
+        v.snap -= first_snap;
+    }
+    let n_cols = pixels.iter().map(|v| v.col).max().unwrap() + 1;
+
+    let image_props = ImageProps {
+        first_snap,
+        last_snap,
+        n_rows,
+        n_cols,
+    };
+
+    (pixels, image_props)
+}
+
+#[derive(Parser)]
+struct Cli {
+    trees_path: std::path::PathBuf,
+    #[clap(parse(from_os_str))]
+    output_path: std::path::PathBuf,
+}
+
+fn main() -> Result<()> {
+    let args = Cli::parse();
+
+    let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
+
     let fout = File::create(args.output_path)?;
 
     for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
         reorder_progenitors(id, 0, &mut halo_props);
-
-        let mut pixels: Vec<Pixel> = Vec::new();
-        let ref_pos = halo_props.positions[id_to_snap(id)].slice(s![id_to_ind(id), ..]);
-
-        place_pixels(id, &mut pixels, ref_pos, 0, &halo_props);
-
-        // NOTE: We could convert pixels.snap to an array first...
-        let first_snap = pixels.iter().map(|v| v.snap).min().unwrap();
-        let last_snap = pixels.iter().map(|v| v.snap).max().unwrap();
-        let n_rows = last_snap - first_snap + 1;
-        for v in pixels.iter_mut() {
-            v.snap -= first_snap;
-        }
-        let n_cols = pixels.iter().map(|v| v.col).max().unwrap() + 1;
+        let (pixels, image_props) = place_pixels(id, &halo_props);
 
         let group = fout.create_group(format!("{id}").as_str())?;
         group
             .new_attr::<u32>()
             .create("first_snap")?
-            .write_scalar(&u32::try_from(first_snap).unwrap())?;
+            .write_scalar(&u32::try_from(image_props.first_snap).unwrap())?;
         group
             .new_attr::<u32>()
             .create("last_snap")?
-            .write_scalar(&u32::try_from(last_snap).unwrap())?;
+            .write_scalar(&u32::try_from(image_props.last_snap).unwrap())?;
 
-        let mut image: Array2<f32> = Array2::zeros((n_rows, n_cols));
+        let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
 
         macro_rules! construct_and_write {
             ( $prop:ident, $name:literal, $image:ident) => {
@@ -256,7 +308,7 @@ fn main() -> Result<()> {
         construct_and_write!(mass, "mass", image);
         construct_and_write!(displacement, "displacement", image);
 
-        let mut image: Array2<u8> = Array2::zeros((n_rows, n_cols));
+        let mut image: Array2<u8> = Array2::zeros((image_props.n_rows, image_props.n_cols));
         construct_and_write!(typ, "type", image);
     }
 
@@ -267,4 +319,29 @@ fn main() -> Result<()> {
     write_unit("displacement", "Mpc", &group)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pixel_counts() {
+        let path = ::std::path::Path::new("../../../../data/nbody/simulations/meraxes-validation/trees/VELOCIraptor.walkabletree.forestID.hdf5");
+        let (final_descendants, mut halo_props) =
+            read_halos(path.to_path_buf()).expect("Falied to read halos from {path}");
+        for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
+            reorder_progenitors(id, 0, &mut halo_props);
+            let (pixels, image_props) = place_pixels(id, &halo_props);
+            let mut test_image: Array2<usize> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            for pixel in pixels.iter() {
+                test_image[[pixel.snap, pixel.col]] = 1;
+            }
+            assert!(
+                test_image.sum() == pixels.len(),
+                "ID = {id} failed sanity check!"
+                );
+        }
+    }
+
 }
