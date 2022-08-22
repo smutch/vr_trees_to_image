@@ -1,7 +1,7 @@
 #![feature(iter_collect_into)]
 
 use ::std::collections::HashSet;
-use std::path::PathBuf;
+use std::{path::PathBuf, io::BufRead};
 
 use clap::Parser;
 use hdf5::{File, Result};
@@ -269,12 +269,21 @@ struct Cli {
     trees_path: PathBuf,
     #[clap(parse(from_os_str))]
     output_path: PathBuf,
+    #[clap(short, long, parse(from_os_str))]
+    target_ids_path: Option<PathBuf>
 }
 
 fn main() -> Result<()> {
     let args = Cli::parse();
 
-    let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
+    let (mut final_descendants, mut halo_props) = read_halos(args.trees_path)?;
+
+    if let Some(path) = args.target_ids_path {
+        let file = std::fs::File::open(path).expect("{path} wasn't found.");
+        let reader = std::io::BufReader::new(file);
+
+        final_descendants = reader.lines().map(|l| l.unwrap().parse::<u64>().unwrap()).collect();
+    }
 
     let fout = File::create(args.output_path)?;
 
