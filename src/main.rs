@@ -15,10 +15,7 @@ fn read_total_snaps(fin: &File) -> Result<usize> {
         .count())
 }
 
-fn read_unique_final_desc(
-    fin: &File,
-    total_snaps: usize,
-) -> Result<HashSet<u64>> {
+fn read_unique_final_desc(fin: &File, total_snaps: usize) -> Result<HashSet<u64>> {
     let mut result = HashSet::new();
     for snap in 0..total_snaps {
         fin.dataset(format!("Snap_{snap:03}/FinalDescendant").as_str())?
@@ -182,9 +179,7 @@ fn write_unit(name: &str, unit: &str, group: &hdf5::Group) -> Result<()> {
     Ok(())
 }
 
-fn read_halos(
-    trees_path: PathBuf,
-) -> Result<(HashSet<u64>, HaloProps)> {
+fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
     let fin = File::open(trees_path)?;
 
     let total_snaps = read_total_snaps(&fin)?;
@@ -264,6 +259,41 @@ fn place_pixels(id: u64, halo_props: &HaloProps) -> (Vec<Pixel>, ImageProps) {
     (pixels, image_props)
 }
 
+fn interpolate_pixels(
+    image: &mut Array2<f32>,
+    image_props: &ImageProps,
+    filler: f32,
+) {
+    for col in 0..image_props.n_cols {
+        let mut start_value = filler;
+        let mut start_index = 0;
+        for row in 0..image_props.n_rows {
+            let pixel = &image[(row, col)];
+            if *pixel != filler {
+                if start_value == filler {
+                    start_index = row;
+                    start_value = *pixel;
+                } else {
+                    let end_index = row;
+                    let end_value = *pixel;
+
+                    assert!(end_index > start_index);
+
+                    let frac: f32 = 1.0 / num_traits::cast::<usize, f32>(end_index - start_index + 1).unwrap();
+                    let diff = end_value - start_value;
+                    for index in start_index+1..end_index {
+                        let ii = num_traits::cast::<usize, f32>(index - start_index).unwrap();
+                        image[(index, col)] = start_value + diff * ii * frac;
+                    }
+
+                    start_index = 0;
+                    start_value = filler;
+                }
+            }
+        }
+    }
+}
+
 #[derive(Parser)]
 struct Cli {
     trees_path: PathBuf,
@@ -336,15 +366,15 @@ mod tests {
         for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
             reorder_progenitors(id, 0, &mut halo_props);
             let (pixels, image_props) = place_pixels(id, &halo_props);
-            let mut test_image: Array2<usize> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            let mut test_image: Array2<usize> =
+                Array2::zeros((image_props.n_rows, image_props.n_cols));
             for pixel in pixels.iter() {
                 test_image[[pixel.snap, pixel.col]] = 1;
             }
             assert!(
                 test_image.sum() == pixels.len(),
                 "ID = {id} failed sanity check!"
-                );
+            );
         }
     }
-
 }
