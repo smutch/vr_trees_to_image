@@ -1,6 +1,6 @@
 #![feature(iter_collect_into)]
 
-use ::std::collections::HashSet;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -276,7 +276,14 @@ fn main() -> Result<()> {
 
     let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
 
-    let fout = File::create(args.output_path)?;
+    if args.output_path.exists() {
+        std::fs::remove_file(&args.output_path).unwrap();
+    }
+
+        // We put the open file in this scope so as to force a close at the end of each iteration.
+        // This removes ownership of the image arrays from the last iteration to keep memory usage
+        // down.
+        let fout = File::append(&args.output_path)?;
 
     for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
         reorder_progenitors(id, 0, &mut halo_props);
@@ -292,8 +299,6 @@ fn main() -> Result<()> {
             .create("last_snap")?
             .write_scalar(&u32::try_from(image_props.last_snap).unwrap())?;
 
-        let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
-
         macro_rules! construct_and_write {
             ( $prop:ident, $name:literal, $image:ident) => {
                 $image.fill(num_traits::cast(0).unwrap());
@@ -308,13 +313,17 @@ fn main() -> Result<()> {
             };
         }
 
-        construct_and_write!(mass, "mass", image);
-        construct_and_write!(displacement, "displacement", image);
+        {
+            let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            construct_and_write!(mass, "mass", image);
+            construct_and_write!(displacement, "displacement", image);
+        }
 
         let mut image: Array2<u8> = Array2::zeros((image_props.n_rows, image_props.n_cols));
         construct_and_write!(typ, "type", image);
     }
 
+    let fout = File::append(args.output_path)?;
     let group = fout.create_group("units")?;
 
     write_unit("mass", "1e10 Msun", &group)?;
