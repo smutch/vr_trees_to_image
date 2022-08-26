@@ -271,14 +271,27 @@ struct Cli {
     output_path: PathBuf,
 }
 
+fn conditional_pbar<T: ExactSizeIterator>(iter: T) -> indicatif::ProgressBarIter<T> {
+    if !log::log_enabled!(log::Level::Debug) {
+        indicatif::ProgressIterator::progress(iter)
+    } else {
+        indicatif::ProgressIterator::progress_with(iter, indicatif::ProgressBar::hidden())
+    }
+}
+
 fn main() -> Result<()> {
+    env_logger::init();
     let args = Cli::parse();
 
     let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
 
     let fout = File::create(args.output_path)?;
 
-    for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
+    for id in conditional_pbar(final_descendants.into_iter()) {
+        // We put the open file in this scope so as to force a close at the end of each iteration.
+        // This removes ownership of the image arrays from the last iteration to keep memory usage
+        // down.
+
         reorder_progenitors(id, 0, &mut halo_props);
         let (pixels, image_props) = place_pixels(id, &halo_props);
 
@@ -291,8 +304,6 @@ fn main() -> Result<()> {
             .new_attr::<u32>()
             .create("last_snap")?
             .write_scalar(&u32::try_from(image_props.last_snap).unwrap())?;
-
-        let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
 
         macro_rules! construct_and_write {
             ( $prop:ident, $name:literal, $image:ident) => {
@@ -308,8 +319,13 @@ fn main() -> Result<()> {
             };
         }
 
-        construct_and_write!(mass, "mass", image);
-        construct_and_write!(displacement, "displacement", image);
+        log::debug!("{id},{},{}", image_props.n_rows, image_props.n_cols);
+
+        {
+            let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            construct_and_write!(mass, "mass", image);
+            construct_and_write!(displacement, "displacement", image);
+        }
 
         let mut image: Array2<u8> = Array2::zeros((image_props.n_rows, image_props.n_cols));
         construct_and_write!(typ, "type", image);
