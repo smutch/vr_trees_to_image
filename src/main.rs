@@ -271,7 +271,16 @@ struct Cli {
     output_path: PathBuf,
 }
 
+fn conditional_pbar<T: ExactSizeIterator>(iter: T) -> indicatif::ProgressBarIter<T> {
+    if !log::log_enabled!(log::Level::Debug) {
+        indicatif::ProgressIterator::progress(iter)
+    } else {
+        indicatif::ProgressIterator::progress_with(iter, indicatif::ProgressBar::hidden())
+    }
+}
+
 fn main() -> Result<()> {
+    env_logger::init();
     let args = Cli::parse();
 
     let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
@@ -280,12 +289,12 @@ fn main() -> Result<()> {
         std::fs::remove_file(&args.output_path).unwrap();
     }
 
+    for id in conditional_pbar(final_descendants.into_iter()) {
         // We put the open file in this scope so as to force a close at the end of each iteration.
         // This removes ownership of the image arrays from the last iteration to keep memory usage
         // down.
         let fout = File::append(&args.output_path)?;
 
-    for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
         reorder_progenitors(id, 0, &mut halo_props);
         let (pixels, image_props) = place_pixels(id, &halo_props);
 
@@ -312,6 +321,8 @@ fn main() -> Result<()> {
                     .create($name)?;
             };
         }
+
+        log::debug!("{id},{},{}", image_props.n_rows, image_props.n_cols);
 
         {
             let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
