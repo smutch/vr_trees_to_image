@@ -85,7 +85,7 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
         let mut cur_id = prog_id;
         let (mut prog_snap, mut prog_ind) = id_to_snap_ind(prog_id);
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
-        let mut _counter = 0u32;
+        let mut np_counter = 0u32;
         while next_id != cur_id {
             max_depth = max_depth.max(reorder_progenitors(next_id, depth + 1, halo_props));
             cur_id = next_id;
@@ -105,13 +105,17 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
                 first_prog_depth = max_depth;
             }
 
-            _counter += 1;
-            if _counter > 1000 {
+            np_counter += 1;
+            if np_counter > 1000 {
                 panic!(
                     "I don't think we should have >1k next progenitors! Something has gone wrong!"
                 );
             }
         }
+    }
+
+    if max_depth > halo_props.progenitors.len().try_into().unwrap() {
+        panic!("Somehow we have a max_depth > the number of snapshots! Something has gone wrong!");
     }
 
     max_depth
@@ -292,6 +296,8 @@ fn main() -> Result<()> {
         // This removes ownership of the image arrays from the last iteration to keep memory usage
         // down.
 
+        log::debug!("id = {id}");
+
         reorder_progenitors(id, 0, &mut halo_props);
         let (pixels, image_props) = place_pixels(id, &halo_props);
 
@@ -319,7 +325,7 @@ fn main() -> Result<()> {
             };
         }
 
-        log::debug!("{id},{},{}", image_props.n_rows, image_props.n_cols);
+        log::debug!("nrows,ncols = {},{}", image_props.n_rows, image_props.n_cols);
 
         {
             let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
