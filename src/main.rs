@@ -103,14 +103,15 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
             }
 
             np_counter += 1;
-            if np_counter > 1000 {
+            if np_counter > 5000 {
                 panic!(
-                    "I don't think we should have >1k next progenitors! Something has gone wrong!"
+                    "I don't think we should have >5k next progenitors! Something has gone wrong!"
                 );
             }
         }
     }
 
+    #[cfg(debug_assertions)]
     if max_depth > halo_props.progenitors.len().try_into().unwrap() {
         panic!("Somehow we have a max_depth > the number of snapshots! Something has gone wrong!");
     }
@@ -155,8 +156,9 @@ fn walk_and_place_pixels(
             let (next_snap, next_ind) = id_to_snap_ind(next_id);
             next_id = halo_props.next_progenitors[next_snap][next_ind];
 
-            if *max_col > 1000 {
-                panic!("I don't think we should have >1k wide tree! Something has gone wrong!");
+            #[cfg(debug_assertions)]
+            if *max_col > 50000 {
+                panic!("I don't think we should have >5k wide tree! Something has gone wrong!");
             }
         }
     }
