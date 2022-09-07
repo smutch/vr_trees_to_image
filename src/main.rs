@@ -30,18 +30,18 @@ fn read_unique_final_desc(fin: &File, total_snaps: usize) -> Result<HashSet<u64>
 struct Pixel {
     snap: usize,
     col: usize,
-    mass: f64,
+    mass: f32,
     typ: u8,
-    displacement: f64,
+    displacement: f32,
 }
 
 #[derive(Debug)]
 struct HaloProps {
     progenitors: Vec<Array1<u64>>,
     next_progenitors: Vec<Array1<u64>>,
-    masses: Vec<Array1<f64>>,
+    masses: Vec<Array1<f32>>,
     types: Vec<Array1<u8>>,
-    positions: Vec<Array2<f64>>,
+    positions: Vec<Array2<f32>>,
 }
 
 #[inline]
@@ -121,7 +121,7 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
 fn walk_and_place_pixels(
     id: u64,
     pixels: &mut Vec<Pixel>,
-    ref_pos: ArrayView1<f64>,
+    ref_pos: ArrayView1<f32>,
     col: usize,
     max_col: &mut usize,
     halo_props: &HaloProps,
@@ -196,21 +196,15 @@ fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
     let mut halo_props = HaloProps::new(total_snaps);
     for snap in 0..total_snaps {
         let group = fin.group(format!("Snap_{snap:03}").as_str())?;
-
-        halo_props.progenitors.push(
-            group
-                .dataset("Progenitor")?
-                .read_1d::<i64>()?
-                .into_iter()
-                .map(|v| v.try_into().unwrap())
-                .collect(),
-        );
+        halo_props
+            .progenitors
+            .push(group.dataset("Progenitor")?.read_1d::<u64>()?);
         halo_props
             .next_progenitors
             .push(group.dataset("NextProgenitor")?.read_1d::<u64>()?);
         halo_props
             .masses
-            .push(group.dataset("Mass_200crit")?.read_1d::<f64>()?);
+            .push(group.dataset("Mass_200crit")?.read_1d::<f32>()?);
         halo_props.types.push(
             group
                 .dataset("hostHaloID")?
@@ -219,9 +213,9 @@ fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
         );
         halo_props.positions.push(ndarray::stack![
             Axis(1),
-            group.dataset("Xc")?.read_1d::<f64>()?,
-            group.dataset("Yc")?.read_1d::<f64>()?,
-            group.dataset("Zc")?.read_1d::<f64>()?
+            group.dataset("Xc")?.read_1d::<f32>()?,
+            group.dataset("Yc")?.read_1d::<f32>()?,
+            group.dataset("Zc")?.read_1d::<f32>()?
         ]);
     }
 
@@ -333,7 +327,7 @@ fn main() -> Result<()> {
         );
 
         {
-            let mut image: Array2<f64> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
             construct_and_write!(mass, "mass", image);
             construct_and_write!(displacement, "displacement", image);
         }
