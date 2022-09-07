@@ -15,10 +15,7 @@ fn read_total_snaps(fin: &File) -> Result<usize> {
         .count())
 }
 
-fn read_unique_final_desc(
-    fin: &File,
-    total_snaps: usize,
-) -> Result<HashSet<u64>> {
+fn read_unique_final_desc(fin: &File, total_snaps: usize) -> Result<HashSet<u64>> {
     let mut result = HashSet::new();
     for snap in 0..total_snaps {
         fin.dataset(format!("Snap_{snap:03}/FinalDescendant").as_str())?
@@ -33,18 +30,18 @@ fn read_unique_final_desc(
 struct Pixel {
     snap: usize,
     col: usize,
-    mass: f32,
+    mass: f64,
     typ: u8,
-    displacement: f32,
+    displacement: f64,
 }
 
 #[derive(Debug)]
 struct HaloProps {
     progenitors: Vec<Array1<u64>>,
     next_progenitors: Vec<Array1<u64>>,
-    masses: Vec<Array1<f32>>,
+    masses: Vec<Array1<f64>>,
     types: Vec<Array1<u8>>,
-    positions: Vec<Array2<f32>>,
+    positions: Vec<Array2<f64>>,
 }
 
 #[inline]
@@ -86,7 +83,7 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
         let (mut prog_snap, mut prog_ind) = id_to_snap_ind(prog_id);
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
         let mut np_counter = 0u32;
-        while next_id != cur_id {
+        while next_id != cur_id && next_id != id {
             max_depth = max_depth.max(reorder_progenitors(next_id, depth + 1, halo_props));
             cur_id = next_id;
             let (next_snap, next_ind) = id_to_snap_ind(next_id);
@@ -95,7 +92,7 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
             if max_depth > first_prog_depth {
                 halo_props.progenitors[snap][ind] = cur_id;
                 halo_props.next_progenitors[next_snap][next_ind] = prog_id;
-                if next_id != cur_id {
+                if next_id != cur_id && next_id != id {
                     halo_props.next_progenitors[prog_snap][prog_ind] = next_id;
                 } else {
                     halo_props.next_progenitors[prog_snap][prog_ind] = prog_id;
@@ -124,7 +121,7 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
 fn walk_and_place_pixels(
     id: u64,
     pixels: &mut Vec<Pixel>,
-    ref_pos: ArrayView1<f32>,
+    ref_pos: ArrayView1<f64>,
     col: usize,
     max_col: &mut usize,
     halo_props: &HaloProps,
@@ -146,7 +143,7 @@ fn walk_and_place_pixels(
         let mut cur_id = prog_id;
         let (prog_snap, prog_ind) = id_to_snap_ind(prog_id);
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
-        while next_id != cur_id {
+        while next_id != cur_id && next_id != id {
             if debug {
                 println!("Next progenitor of {id} = {next_id} (from {cur_id})");
             }
@@ -186,9 +183,7 @@ fn write_unit(name: &str, unit: &str, group: &hdf5::Group) -> Result<()> {
     Ok(())
 }
 
-fn read_halos(
-    trees_path: PathBuf,
-) -> Result<(HashSet<u64>, HaloProps)> {
+fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
     let fin = File::open(trees_path)?;
 
     let total_snaps = read_total_snaps(&fin)?;
@@ -201,15 +196,21 @@ fn read_halos(
     let mut halo_props = HaloProps::new(total_snaps);
     for snap in 0..total_snaps {
         let group = fin.group(format!("Snap_{snap:03}").as_str())?;
-        halo_props
-            .progenitors
-            .push(group.dataset("Progenitor")?.read_1d::<u64>()?);
+
+        halo_props.progenitors.push(
+            group
+                .dataset("Progenitor")?
+                .read_1d::<i64>()?
+                .into_iter()
+                .map(|v| v.try_into().unwrap())
+                .collect(),
+        );
         halo_props
             .next_progenitors
             .push(group.dataset("NextProgenitor")?.read_1d::<u64>()?);
         halo_props
             .masses
-            .push(group.dataset("Mass_200crit")?.read_1d::<f32>()?);
+            .push(group.dataset("Mass_200crit")?.read_1d::<f64>()?);
         halo_props.types.push(
             group
                 .dataset("hostHaloID")?
@@ -218,9 +219,9 @@ fn read_halos(
         );
         halo_props.positions.push(ndarray::stack![
             Axis(1),
-            group.dataset("Xc")?.read_1d::<f32>()?,
-            group.dataset("Yc")?.read_1d::<f32>()?,
-            group.dataset("Zc")?.read_1d::<f32>()?
+            group.dataset("Xc")?.read_1d::<f64>()?,
+            group.dataset("Yc")?.read_1d::<f64>()?,
+            group.dataset("Zc")?.read_1d::<f64>()?
         ]);
     }
 
@@ -325,10 +326,14 @@ fn main() -> Result<()> {
             };
         }
 
-        log::debug!("nrows,ncols = {},{}", image_props.n_rows, image_props.n_cols);
+        log::debug!(
+            "nrows,ncols = {},{}",
+            image_props.n_rows,
+            image_props.n_cols
+        );
 
         {
-            let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            let mut image: Array2<f64> = Array2::zeros((image_props.n_rows, image_props.n_cols));
             construct_and_write!(mass, "mass", image);
             construct_and_write!(displacement, "displacement", image);
         }
@@ -358,15 +363,15 @@ mod tests {
         for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
             reorder_progenitors(id, 0, &mut halo_props);
             let (pixels, image_props) = place_pixels(id, &halo_props);
-            let mut test_image: Array2<usize> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+            let mut test_image: Array2<usize> =
+                Array2::zeros((image_props.n_rows, image_props.n_cols));
             for pixel in pixels.iter() {
                 test_image[[pixel.snap, pixel.col]] = 1;
             }
             assert!(
                 test_image.sum() == pixels.len(),
                 "ID = {id} failed sanity check!"
-                );
+            );
         }
     }
-
 }
