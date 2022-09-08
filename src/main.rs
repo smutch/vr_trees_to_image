@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use hdf5::{File, Result};
+use log::info;
 use ndarray::{s, Array1, Array2, ArrayView1, Axis};
 
 fn read_total_snaps(fin: &File) -> Result<usize> {
@@ -92,6 +93,7 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
             }
 
             np_counter += 1;
+            #[cfg(debug_assertions)]
             if np_counter > 5000 {
                 panic!(
                     "I don't think we should have >5k next progenitors! Something has gone wrong!"
@@ -115,32 +117,19 @@ fn walk_and_place_pixels(
     col: usize,
     max_col: &mut usize,
     halo_props: &HaloProps,
-    debug: bool,
 ) {
-    if debug {
-        println!("{id}");
-    }
-
     let (snap, ind) = id_to_snap_ind(id);
     let prog_id = halo_props.progenitors[snap][ind];
 
     if prog_id != id {
-        if debug {
-            println!("First progenitor of {id} = {prog_id}");
-        }
-        walk_and_place_pixels(prog_id, pixels, ref_pos, col, max_col, halo_props, debug);
+        walk_and_place_pixels(prog_id, pixels, ref_pos, col, max_col, halo_props);
 
         let mut cur_id = prog_id;
         let (prog_snap, prog_ind) = id_to_snap_ind(prog_id);
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
         while next_id != cur_id && next_id != id {
-            if debug {
-                println!("Next progenitor of {id} = {next_id} (from {cur_id})");
-            }
             *max_col += 1;
-            walk_and_place_pixels(
-                next_id, pixels, ref_pos, *max_col, max_col, halo_props, debug,
-            );
+            walk_and_place_pixels(next_id, pixels, ref_pos, *max_col, max_col, halo_props);
             cur_id = next_id;
             let (next_snap, next_ind) = id_to_snap_ind(next_id);
             next_id = halo_props.next_progenitors[next_snap][next_ind];
@@ -154,10 +143,6 @@ fn walk_and_place_pixels(
 
     let pos = halo_props.positions[snap].slice(s![ind, ..]).into_owned();
     let displacement = (pos - ref_pos).mapv(|v| v.powi(2)).sum().sqrt();
-
-    if debug {
-        println!("{id},{snap},{col}");
-    }
 
     pixels.push(Pixel {
         snap,
@@ -186,15 +171,12 @@ fn read_final_descendants(trees_path: &PathBuf) -> Result<HashSet<u64>> {
             .collect_into(&mut final_descendants);
     }
     let n_final_descendants = final_descendants.len();
-    println!("Found {n_final_descendants} unique FinalDescendant IDs");
+    info!("Found {n_final_descendants} unique FinalDescendant IDs");
 
     Ok(final_descendants)
 }
 
-fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
-
-    let final_descendants = read_final_descendants(&trees_path)?;
-
+fn read_halos(trees_path: PathBuf) -> Result<HaloProps> {
     let fin = File::open(trees_path)?;
     let total_snaps = read_total_snaps(&fin)?;
 
@@ -224,7 +206,7 @@ fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
         ]);
     }
 
-    Ok((final_descendants, halo_props))
+    Ok(halo_props)
 }
 
 #[derive(Debug)]
@@ -246,7 +228,6 @@ fn place_pixels(id: u64, halo_props: &HaloProps) -> (Vec<Pixel>, ImageProps) {
         0,
         &mut 0,
         halo_props,
-        false,
         // id == 619000000000517
     );
 
@@ -274,7 +255,9 @@ struct Cli {
     #[clap(parse(from_os_str))]
     output_path: PathBuf,
     #[clap(short, long, action)]
-    final_descendants_list: bool
+    dump_final_descendants: bool,
+    #[clap(short, long, parse(from_os_str))]
+    read_final_descendants: Option<PathBuf>,
 }
 
 fn conditional_pbar<T: ExactSizeIterator>(iter: T) -> indicatif::ProgressBarIter<T> {
@@ -285,7 +268,10 @@ fn conditional_pbar<T: ExactSizeIterator>(iter: T) -> indicatif::ProgressBarIter
     }
 }
 
-fn dump_final_descendants(fname_out: PathBuf, final_descendants: HashSet<u64>) -> std::result::Result<(), std::io::Error> {
+fn dump_final_descendants(
+    fname_out: PathBuf,
+    final_descendants: HashSet<u64>,
+) -> std::result::Result<(), std::io::Error> {
     use std::io::Write;
     let mut fout = std::fs::File::create(fname_out)?;
     for final_desc in final_descendants {
@@ -294,25 +280,46 @@ fn dump_final_descendants(fname_out: PathBuf, final_descendants: HashSet<u64>) -
     Ok(())
 }
 
+fn read_target_ids(fname_in: PathBuf) -> std::result::Result<HashSet<u64>, std::io::Error> {
+    use std::io::{BufRead, BufReader};
+
+    let file = std::fs::File::open(&fname_in)?;
+    let buffered = BufReader::new(file);
+
+    let mut result = HashSet::new();
+    for line in buffered.lines() {
+        result.insert(line?.parse::<u64>().unwrap());
+    }
+
+    let n_target_ids = result.len();
+    info!(
+        "Read {n_target_ids} final final_descendant IDs from {:?}",
+        fname_in
+    );
+
+    Ok(result)
+}
+
 fn main() -> Result<()> {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Cli::parse();
 
-    if args.final_descendants_list {
+    if args.dump_final_descendants {
         let final_descendants = read_final_descendants(&args.trees_path)?;
         dump_final_descendants(args.output_path, final_descendants).unwrap();
         return Ok(());
     }
 
-    let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
+    let final_descendants = args
+        .read_final_descendants
+        .map(|fname| read_target_ids(fname).unwrap())
+        .unwrap_or_else(|| read_final_descendants(&args.trees_path).unwrap());
+
+    let mut halo_props = read_halos(args.trees_path)?;
 
     let fout = File::create(args.output_path)?;
 
     for id in conditional_pbar(final_descendants.into_iter()) {
-        // We put the open file in this scope so as to force a close at the end of each iteration.
-        // This removes ownership of the image arrays from the last iteration to keep memory usage
-        // down.
-
         log::debug!("id = {id}");
 
         reorder_progenitors(id, 0, &mut halo_props);
@@ -365,29 +372,4 @@ fn main() -> Result<()> {
     write_unit("displacement", "Mpc", &group)?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pixel_counts() {
-        let path = ::std::path::Path::new("../../../../data/nbody/simulations/meraxes-validation/trees/VELOCIraptor.walkabletree.forestID.hdf5");
-        let (final_descendants, mut halo_props) =
-            read_halos(path.to_path_buf()).expect("Falied to read halos from {path}");
-        for id in indicatif::ProgressIterator::progress(final_descendants.into_iter()) {
-            reorder_progenitors(id, 0, &mut halo_props);
-            let (pixels, image_props) = place_pixels(id, &halo_props);
-            let mut test_image: Array2<usize> =
-                Array2::zeros((image_props.n_rows, image_props.n_cols));
-            for pixel in pixels.iter() {
-                test_image[[pixel.snap, pixel.col]] = 1;
-            }
-            assert!(
-                test_image.sum() == pixels.len(),
-                "ID = {id} failed sanity check!"
-            );
-        }
-    }
 }
