@@ -15,17 +15,6 @@ fn read_total_snaps(fin: &File) -> Result<usize> {
         .count())
 }
 
-fn read_unique_final_desc(fin: &File, total_snaps: usize) -> Result<HashSet<u64>> {
-    let mut result = HashSet::new();
-    for snap in 0..total_snaps {
-        fin.dataset(format!("Snap_{snap:03}/FinalDescendant").as_str())?
-            .read_1d::<u64>()?
-            .iter()
-            .collect_into(&mut result);
-    }
-    Ok(result)
-}
-
 #[derive(Debug)]
 struct Pixel {
     snap: usize,
@@ -185,15 +174,29 @@ fn write_unit(name: &str, unit: &str, group: &hdf5::Group) -> Result<()> {
     Ok(())
 }
 
-fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
+fn read_final_descendants(trees_path: &PathBuf) -> Result<HashSet<u64>> {
     let fin = File::open(trees_path)?;
 
     let total_snaps = read_total_snaps(&fin)?;
-    println!("Total snaps = {total_snaps}");
-
-    let final_descendants = read_unique_final_desc(&fin, total_snaps)?;
+    let mut final_descendants = HashSet::new();
+    for snap in 0..total_snaps {
+        fin.dataset(format!("Snap_{snap:03}/FinalDescendant").as_str())?
+            .read_1d::<u64>()?
+            .iter()
+            .collect_into(&mut final_descendants);
+    }
     let n_final_descendants = final_descendants.len();
     println!("Found {n_final_descendants} unique FinalDescendant IDs");
+
+    Ok(final_descendants)
+}
+
+fn read_halos(trees_path: PathBuf) -> Result<(HashSet<u64>, HaloProps)> {
+
+    let final_descendants = read_final_descendants(&trees_path)?;
+
+    let fin = File::open(trees_path)?;
+    let total_snaps = read_total_snaps(&fin)?;
 
     let mut halo_props = HaloProps::new(total_snaps);
     for snap in 0..total_snaps {
@@ -270,6 +273,8 @@ struct Cli {
     trees_path: PathBuf,
     #[clap(parse(from_os_str))]
     output_path: PathBuf,
+    #[clap(short, long, action)]
+    final_descendants_list: bool
 }
 
 fn conditional_pbar<T: ExactSizeIterator>(iter: T) -> indicatif::ProgressBarIter<T> {
@@ -280,9 +285,24 @@ fn conditional_pbar<T: ExactSizeIterator>(iter: T) -> indicatif::ProgressBarIter
     }
 }
 
+fn dump_final_descendants(fname_out: PathBuf, final_descendants: HashSet<u64>) -> std::result::Result<(), std::io::Error> {
+    use std::io::Write;
+    let mut fout = std::fs::File::create(fname_out)?;
+    for final_desc in final_descendants {
+        writeln!(fout, "{}", final_desc)?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let args = Cli::parse();
+
+    if args.final_descendants_list {
+        let final_descendants = read_final_descendants(&args.trees_path)?;
+        dump_final_descendants(args.output_path, final_descendants).unwrap();
+        return Ok(());
+    }
 
     let (final_descendants, mut halo_props) = read_halos(args.trees_path)?;
 
