@@ -1,3 +1,4 @@
+.env
 tree_images.h5
 *.png
 
