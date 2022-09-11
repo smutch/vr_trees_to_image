@@ -16,7 +16,7 @@ segment_fds splits:
     tempdir=$(mktemp -d)
     trap 'rm -rf "$tempdir"' EXIT SIGINT SIGKILL
 
-    ./target/release/gen_tree_images -d {{ input }} ${tempdir}/fd_list.txt
+    cargo run --release -- -d {{ input }} ${tempdir}/fd_list.txt
     sort -n ${tempdir}/fd_list.txt > ${tempdir}/fd_sorted.txt
     split_size=$(awk 'END{ print int(NR/{{ splits }}) }' ${tempdir}/fd_sorted.txt)
     mkdir -p fds
