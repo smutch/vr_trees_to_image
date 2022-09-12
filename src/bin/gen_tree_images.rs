@@ -21,7 +21,7 @@ struct Pixel {
     snap: usize,
     col: usize,
     mass: f32,
-    typ: u8,
+    typ: i8,
     displacement: f32,
 }
 
@@ -30,7 +30,7 @@ struct HaloProps {
     progenitors: Vec<Array1<u64>>,
     next_progenitors: Vec<Array1<u64>>,
     masses: Vec<Array1<f32>>,
-    types: Vec<Array1<u8>>,
+    types: Vec<Array1<i8>>,
     positions: Vec<Array2<f32>>,
 }
 
@@ -362,7 +362,7 @@ fn main() -> Result<()> {
             construct_and_write!(displacement, "displacement", image, 0);
         }
 
-        let mut image: Array2<u8> = Array2::zeros((image_props.n_rows, image_props.n_cols));
+        let mut image: Array2<i8> = Array2::zeros((image_props.n_rows, image_props.n_cols));
         construct_and_write!(typ, "type", image, -1);
     }
 
