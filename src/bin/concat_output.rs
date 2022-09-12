@@ -21,10 +21,13 @@ fn main() -> Result<()> {
 
     let fout = File::create(args.out)?;
 
-    for fname in fnames {
+    for fname in fnames.iter() {
         let fin = File::open(&fname)?;
         log::info!("Linking {}", fname.display());
         for grp in fin.groups()? {
+            if grp.name() == "/units" {
+                continue;
+            }
             fout.link_external(
                 fname
                     .to_str()
@@ -34,6 +37,8 @@ fn main() -> Result<()> {
             )?;
         }
     }
+
+    fout.link_external(&fnames[0].to_string_lossy(), "/units", "/units")?;
 
     Ok(())
 }
