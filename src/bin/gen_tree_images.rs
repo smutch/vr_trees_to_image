@@ -251,6 +251,7 @@ fn place_pixels(id: u64, halo_props: &HaloProps) -> (Vec<Pixel>, ImageProps) {
 
 #[derive(Parser)]
 struct Cli {
+    #[clap(parse(from_os_str))]
     trees_path: PathBuf,
     #[clap(parse(from_os_str))]
     output_path: PathBuf,

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "3.2", features = ["derive"] }
 env_logger = "0.9"
+glob = "0.3.0"
 # hdf5 = "0.8.1"
 hdf5 = { git = "https://github.com/mulimoen/hdf5-rust.git", branch = "bugfix/class_leak" }
 indicatif = "0.17"
