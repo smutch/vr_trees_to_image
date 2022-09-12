@@ -72,7 +72,10 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
         let mut cur_id = prog_id;
         let (mut prog_snap, mut prog_ind) = id_to_snap_ind(prog_id);
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
+
+        #[cfg(debug_assertions)]
         let mut np_counter = 0u32;
+
         while next_id != cur_id && next_id != id {
             max_depth = max_depth.max(reorder_progenitors(next_id, depth + 1, halo_props));
             cur_id = next_id;
@@ -92,12 +95,14 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
                 first_prog_depth = max_depth;
             }
 
-            np_counter += 1;
             #[cfg(debug_assertions)]
-            if np_counter > 5000 {
-                panic!(
-                    "I don't think we should have >5k next progenitors! Something has gone wrong!"
-                );
+            {
+                np_counter += 1;
+                if np_counter > 5000 {
+                    panic!(
+                        "I don't think we should have >5k next progenitors! Something has gone wrong!"
+                        );
+                }
             }
         }
     }
