@@ -337,8 +337,8 @@ fn main() -> Result<()> {
             .write_scalar(&u32::try_from(image_props.last_snap).unwrap())?;
 
         macro_rules! construct_and_write {
-            ( $prop:ident, $name:literal, $image:ident) => {
-                $image.fill(num_traits::cast(0).unwrap());
+            ( $prop:ident, $name:literal, $image:ident, $fillval:literal) => {
+                $image.fill(num_traits::cast($fillval).unwrap());
                 for pixel in pixels.iter() {
                     $image[[pixel.snap, pixel.col]] = pixel.$prop;
                 }
@@ -358,12 +358,12 @@ fn main() -> Result<()> {
 
         {
             let mut image: Array2<f32> = Array2::zeros((image_props.n_rows, image_props.n_cols));
-            construct_and_write!(mass, "mass", image);
-            construct_and_write!(displacement, "displacement", image);
+            construct_and_write!(mass, "mass", image, 0);
+            construct_and_write!(displacement, "displacement", image, 0);
         }
 
         let mut image: Array2<u8> = Array2::zeros((image_props.n_rows, image_props.n_cols));
-        construct_and_write!(typ, "type", image);
+        construct_and_write!(typ, "type", image, -1);
     }
 
     let group = fout.create_group("units")?;
