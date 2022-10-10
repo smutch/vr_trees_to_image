@@ -16,7 +16,7 @@ fn read_total_snaps(fin: &File) -> Result<usize> {
         .count())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Pixel {
     pub snap: usize,
     pub col: usize,
@@ -220,12 +220,17 @@ fn walk_and_place_pixels(
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
         while next_id != cur_id && next_id != id {
             *max_col += 1;
-            walk_and_place_pixels(next_id, pixels, ref_pos, *max_col, max_col, halo_props);
+            let next_col = *max_col;
+            walk_and_place_pixels(next_id, pixels, ref_pos, next_col, max_col, halo_props);
 
             let (next_snap, next_ind) = id_to_snap_ind(next_id);
 
             if snap - next_snap > 1 {
-                lerp(id, next_id, ref_pos, col, halo_props, pixels);
+                let mut last_pixel = pixels.last().unwrap().to_owned();
+                for fill_snap in next_snap+1..snap {
+                    last_pixel.snap = fill_snap;
+                    pixels.push(last_pixel);
+                }
             }
 
             cur_id = next_id;
