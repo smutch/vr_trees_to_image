@@ -1,4 +1,4 @@
 Still to do:
 
-- [ ] Interpolation of skipped snapshots
-- [ ] Clean up code
+- [x] Interpolation of skipped snapshots
+- [x] Clean up code
