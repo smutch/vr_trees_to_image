@@ -133,6 +133,8 @@ fn lerp(
     halo_props: &HaloProps,
     pixels: &mut Vec<Pixel>,
 ) {
+    log::debug!("lerping between {} and {}", a_id, b_id);
+
     let (a_snap, a_ind) = id_to_snap_ind(a_id);
     let (b_snap, b_ind) = id_to_snap_ind(b_id);
 
@@ -214,7 +216,7 @@ fn walk_and_place_pixels(
         let (prog_snap, prog_ind) = id_to_snap_ind(prog_id);
 
         if snap - prog_snap > 1 {
-            lerp(id, prog_id, ref_pos, col, halo_props, pixels);
+            lerp(prog_id, id, ref_pos, col, halo_props, pixels);
         }
 
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
