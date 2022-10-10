@@ -115,6 +115,45 @@ fn reorder_progenitors(id: u64, depth: u32, halo_props: &mut HaloProps) -> u32 {
     max_depth
 }
 
+fn lerp(
+    a_id: u64,
+    b_id: u64,
+    ref_pos: ArrayView1<f32>,
+    col: usize,
+    halo_props: &HaloProps,
+    pixels: &mut Vec<Pixel>,
+) {
+    let (a_snap, a_ind) = id_to_snap_ind(a_id);
+    let (b_snap, b_ind) = id_to_snap_ind(b_id);
+
+    let a_mass = halo_props.masses[a_snap][a_ind];
+    let b_mass = halo_props.masses[b_snap][b_ind];
+
+    let typ = halo_props.types[a_snap][a_ind];
+
+    let a_pos = halo_props.positions[a_snap]
+        .slice(s![a_ind, ..])
+        .into_owned();
+    let a_disp = (a_pos - ref_pos).mapv(|v| v.powi(2)).sum().sqrt();
+    let b_pos = halo_props.positions[b_snap]
+        .slice(s![b_ind, ..])
+        .into_owned();
+    let b_disp = (b_pos - ref_pos).mapv(|v| v.powi(2)).sum().sqrt();
+
+    for snap in a_snap..b_snap {
+        let frac = (snap - a_snap) as f32 / (b_snap - a_snap) as f32;
+        let mass = a_mass + (b_mass - a_mass) * frac;
+        let disp = a_disp + (b_disp - a_disp) * frac;
+        pixels.push(Pixel {
+            snap,
+            col,
+            mass,
+            typ,
+            displacement: disp,
+        });
+    }
+}
+
 fn walk_and_place_pixels(
     id: u64,
     pixels: &mut Vec<Pixel>,
@@ -131,12 +170,23 @@ fn walk_and_place_pixels(
 
         let mut cur_id = prog_id;
         let (prog_snap, prog_ind) = id_to_snap_ind(prog_id);
+
+        if snap - prog_snap > 1 {
+            lerp(id, prog_id, ref_pos, col, halo_props, pixels);
+        }
+
         let mut next_id = halo_props.next_progenitors[prog_snap][prog_ind];
         while next_id != cur_id && next_id != id {
             *max_col += 1;
             walk_and_place_pixels(next_id, pixels, ref_pos, *max_col, max_col, halo_props);
-            cur_id = next_id;
+
             let (next_snap, next_ind) = id_to_snap_ind(next_id);
+
+            if snap - next_snap > 1 {
+                lerp(id, next_id, ref_pos, col, halo_props, pixels);
+            }
+
+            cur_id = next_id;
             next_id = halo_props.next_progenitors[next_snap][next_ind];
 
             #[cfg(debug_assertions)]
